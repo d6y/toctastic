@@ -1,29 +1,30 @@
-import org.apache.pdfbox.pdmodel.{PDPage, PDDocument}
-import org.apache.pdfbox.text.PDFTextStripper
-import java.io.File
+import com.itextpdf.text.Document
+import com.itextpdf.text.pdf.{ PdfCopy, PdfReader}
+import com.itextpdf.text.pdf.parser.{ PdfReaderContentParser, SimpleTextExtractionStrategy}
+import java.io.FileOutputStream
 
 // The idea is to locate the TOC page numbers
-case class InclusivePageIndexRange(first: Int, last: Int)
+case class InclusivePageRange(first: Int, last: Int)
 
-// Once we have locate the page numbers we will splice the TOC
-// from the source (full PDF), replacing the TOC in the
-// destination (preview PDF)
+// Once we the page numbers we will splice the TOC from the source (full PDF),
+// replacing the TOC in the destination (preview PDF)
 case class Splice(
-  source: PDDocument, select:  InclusivePageIndexRange,
-  dest:   PDDocument, replace: InclusivePageIndexRange
+  source: PdfReader, select:  InclusivePageRange,
+  dest:   PdfReader, replace: InclusivePageRange
 )
 
 // Splicing will create a new document, not modify an existing one
 object Editor {
-  def apply(command: Splice): PDDocument = {
+  def apply(command: Splice, outputFilename: String): Unit  = {
+    val doc = new Document()
+    val copier = new PdfCopy(doc, new FileOutputStream(outputFilename))
+    doc.open
+    def from(pdf: PdfReader)(page: Int): Unit = copier.addPage(copier.getImportedPage(pdf, page))
     import command._
-    val doc = new PDDocument()
-    val pages =
-      (0 until replace.first).map(dest.getPage) ++
-      (select.first until select.last).map(source.getPage) ++
-      (replace.last until dest.getNumberOfPages).map(dest.getPage)
-    pages.foreach(doc.importPage)
-    doc
+    (1 until replace.first).foreach(from(dest))
+    (select.first to select.last).foreach(from(source))
+    (replace.last to dest.getNumberOfPages).foreach(from(dest))
+    doc.close
   }
 }
 
@@ -35,55 +36,38 @@ object Editor {
 object TOCFinder {
 
   // Does the given page in the given document start with the given text?
-  def hasTitle(text: String, doc: PDDocument)(pageIndex: Int): Boolean = {
-    val reader = new PDFTextStripper()
-    reader.setStartPage(pageIndex)
-    reader.setEndPage(pageIndex)
-    val text = reader.getText(doc)
-    text.trim.startsWith(text)
+  def hasTitle(text: String, doc: PdfReader)(pageIndex: Int): Boolean = {
+    val parser = new PdfReaderContentParser(doc)
+    val content = parser.processContent(pageIndex, new SimpleTextExtractionStrategy()).getResultantText()
+    content.trim.startsWith(text)
   }
 
-  def apply(doc: PDDocument): Option[InclusivePageIndexRange] = {
-    val tocStartIndex = 2 // page 3
+  def apply(doc: PdfReader): Option[InclusivePageRange] = {
+    val tocStartPage = 3
     val preface = hasTitle("Preface", doc) _
-    // When searching we start from the page after the first TOC page:
-    Stream.from(tocStartIndex+1).find(preface).map { endIndex =>
-      InclusivePageIndexRange(tocStartIndex, endIndex-1)
+    Stream.from(tocStartPage+1).find(preface).map { endPage =>
+      InclusivePageRange(tocStartPage, endPage-1)
     }
   }
 }
 
 object Toctastic extends App {
 
-  // Ensure we close the files
-  def using[T](a: PDDocument, b: PDDocument)(f: (PDDocument, PDDocument) => T): T =
-    try f(a,b) finally {
-      a.close
-      b.close
-    }
-
-  def open(filename: String) = PDDocument.load(new File(filename))
-
   args match {
     case Array(fullFilename, previewFilename, outputFilename) =>
-      using( open(fullFilename), open(previewFilename) ) { (full, preview) =>
 
-        val command: Option[Splice] = for {
-          fullToc    <- TOCFinder(full)
-          previewToc <- TOCFinder(preview)
-        } yield Splice(full, fullToc, preview, previewToc)
+      val full = new PdfReader(fullFilename)
+      val preview = new PdfReader(previewFilename)
 
-        command match {
-          case None => println("Unable to find TOCs")
-          case _    => command.
-            map(Editor.apply).
-            foreach(doc => {
-              doc.save(outputFilename)
-              doc.close
-              }
-            )
-        }
-      }
+      val command: Option[Splice] = for {
+        fullToc    <- TOCFinder(full)
+        previewToc <- TOCFinder(preview)
+      } yield Splice(full, fullToc, preview, previewToc)
+
+      // println(command)
+
+      command.fold(println("Unable to find TOCs"))(Editor(_, outputFilename))
+
     case _ => println("Usage: full.psd preview.pdf out.pdf")
   }
 }
