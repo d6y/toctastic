@@ -6,7 +6,7 @@ import java.io.FileOutputStream
 // The idea is to locate the TOC page numbers
 case class InclusivePageRange(first: Int, last: Int)
 
-// Once we the page numbers we will splice the TOC from the source (full PDF),
+// Once we have the page numbers we will splice the TOC from the source (full PDF),
 // replacing the TOC in the destination (preview PDF)
 case class Splice(
   source: PdfReader, select:  InclusivePageRange,
