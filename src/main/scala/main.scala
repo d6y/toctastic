@@ -35,10 +35,11 @@ object Editor {
 // The problem, then, is locating the end of the TOC.
 
 // We do that by searching for a page that starts with the word "Preface" or "Foreword".
-// The preface (or foreword) is the first page after the TOC, so give us the end of the TOC.
+// The preface is the first page after the TOC, so give us the end of the TOC.
+// (In Essential Play there's no preface or foreward, so we look for Introduction)
 object TOCFinder {
 
-  val regex = Pattern.compile("^(Foreword|Preface).*", Pattern.DOTALL)
+  val regex = Pattern.compile("^(Foreword|Preface|Introdu).*", Pattern.DOTALL)
 
   // Does the given page in the given document start with the given regex?
   def hasTitle(pattern: Pattern, doc: PdfReader)(pageIndex: Int): Boolean = {
